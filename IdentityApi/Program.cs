@@ -7,15 +7,6 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. EF Core ve Identity için DbContext'i ekle
-builder.Services.AddDbContext<IdentityDbContext>(options =>
-{
-    options.UseNpgsql(builder.Configuration.GetConnectionString("IdentityConnection"));
-    // OpenIddict'in EF Core entegrasyonunu etkinleştir
-    options.UseOpenIddict();
-});
-
-// 2. ASP.NET Core Identity'yi ekle
 builder.Services.AddIdentity<ApplicationUser, ApplicationRole>(options =>
 {
     options.SignIn.RequireConfirmedEmail = true;
@@ -95,6 +86,12 @@ builder.Services.AddOpenIddict()
         options.UseAspNetCore();
     });
 
+builder.Services.AddDbContext<IdentityDbContext>(options =>
+{
+    options.UseNpgsql(builder.Configuration.GetConnectionString("IdentityConnection"));
+});
+
+
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("InternalApiAccess", policy =>
@@ -105,6 +102,7 @@ builder.Services.AddAuthorization(options =>
     });
 });
 
+builder.Services.AddHostedService<MigrationService>();
 builder.Services.AddHostedService<ClientRegistration>();
 
 // === Email Servisi ===
@@ -140,13 +138,5 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
-// Veritabanını oluştur/güncelle (Demo için)
-// Production'da `dotnet ef database update` kullanılmalı
-using (var scope = app.Services.CreateScope())
-{
-    var context = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-    context.Database.Migrate();
-}
 
 app.Run();
