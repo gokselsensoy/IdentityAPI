@@ -3,12 +3,12 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace IdentityApi.Services.Concrete
 {
-    public class ClientRegistration : IHostedService
+    public class ClientRegistrationService : IHostedService
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly IConfiguration _configuration;
 
-        public ClientRegistration(
+        public ClientRegistrationService(
             IServiceProvider serviceProvider,
             IConfiguration configuration)
         {

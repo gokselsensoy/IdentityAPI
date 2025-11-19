@@ -4,6 +4,7 @@ using IdentityApi.Services.Abstracts;
 using IdentityApi.Services.Concrete;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using OpenIddict.Validation.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -49,8 +50,7 @@ builder.Services.AddOpenIddict()
     .AddCore(options =>
     {
         options.UseEntityFrameworkCore()
-               .UseDbContext<IdentityDbContext>()
-               .ReplaceDefaultEntities<Guid>();
+               .UseDbContext<IdentityDbContext>();
     })
     .AddServer(options =>
     {
@@ -89,6 +89,7 @@ builder.Services.AddOpenIddict()
 builder.Services.AddDbContext<IdentityDbContext>(options =>
 {
     options.UseNpgsql(builder.Configuration.GetConnectionString("IdentityConnection"));
+    options.UseOpenIddict();
 });
 
 
@@ -97,13 +98,15 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("InternalApiAccess", policy =>
     {
         // Token'ın "client_id" claim'ini kontrol et
+        policy.AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         policy.RequireClaim("client_id", "logistics_api_service");
         // policy.RequireScope("internal_api"); 
     });
 });
 
 builder.Services.AddHostedService<MigrationService>();
-builder.Services.AddHostedService<ClientRegistration>();
+builder.Services.AddHostedService<RoleSeedingService>();
+builder.Services.AddHostedService<ClientRegistrationService>();
 
 // === Email Servisi ===
 // IEmailService ve somut bir implementasyon eklemeliyiz
@@ -121,7 +124,35 @@ builder.Services.AddHttpClient<IIntegrationService, HttpWebhookIntegrationServic
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    // 1. Swagger'a "Bearer" şemasını tanımla
+    options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description = "JWT Authorization header using the Bearer scheme."
+    });
+
+    // 2. Bu güvenliği tüm endpoint'lere uygula
+    options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] {}
+        }
+    });
+});
 
 var app = builder.Build();
 
