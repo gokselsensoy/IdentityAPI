@@ -106,7 +106,8 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddHostedService<MigrationService>();
 builder.Services.AddHostedService<RoleSeedingService>();
-builder.Services.AddHostedService<ClientRegistrationService>();
+builder.Services.AddHostedService<ClientRegistrationWorker>();
+builder.Services.AddHostedService<ScopeRegistrationWorker>();
 
 // === Email Servisi ===
 // IEmailService ve somut bir implementasyon eklemeliyiz

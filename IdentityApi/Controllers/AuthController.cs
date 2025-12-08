@@ -12,6 +12,7 @@ using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Security.Principal;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace IdentityApi.Controllers
@@ -171,17 +172,11 @@ namespace IdentityApi.Controllers
             if (!result.Succeeded)
                 return BadRequest(result.Errors);
 
-            // === ÖNEMLİ FARKLAR ===
-            // 1. Email'i otomatik onayla, çünkü admin oluşturuyor
             var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
             await _userManager.ConfirmEmailAsync(user, token);
 
-            // 2. İstenen rolü ata
-            // (Önce rolün DB'de var olduğundan emin olmalıyız, şimdilik var sayıyoruz)
             await _userManager.AddToRoleAsync(user, request.Role);
 
-            // 3. LogisticsAPI'ye webhook ile haber ver (Sync için)
-            //await _integrationService.NotifyUserUpdatedAsync(user.Id, user.Email);
 
             return Ok(new CreateInternalUserResponse(user.Id, user.Email));
         }
@@ -284,6 +279,16 @@ namespace IdentityApi.Controllers
                 // Kullanıcı için Principal oluştur
                 var principal = await _signInManager.CreateUserPrincipalAsync(user);
 
+                var identity = (ClaimsIdentity)principal.Identity;
+
+                if (!principal.HasClaim(c => c.Type == OpenIddictConstants.Claims.Subject))
+                {
+                    identity.AddClaim(new Claim(
+                        type: OpenIddictConstants.Claims.Subject,
+                        value: await _userManager.GetUserIdAsync(user)) // Kullanıcı ID'sini basıyoruz
+                    );
+                }
+
                 // Scope ve Destination ayarlarını yap
                 principal.SetScopes(openIddictRequest.GetScopes());
                 foreach (var claim in principal.Claims)
@@ -339,17 +344,27 @@ namespace IdentityApi.Controllers
         // Yardımcı Metot: Claim'lerin Access Token'a mı yoksa Identity Token'a mı gideceğini belirler
         private static IEnumerable<string> GetDestinations(Claim claim)
         {
-            // Basit versiyon: Her şeyi Access Token'a koy
+            // Servisler arası iletişimde genellikle sadece Access Token yeterlidir.
             yield return Destinations.AccessToken;
         }
 
+        // Helper Metot 2: Kullanıcı (Password/Refresh Grant) için detaylı versiyon
         private static IEnumerable<string> GetDestinations(Claim claim, ClaimsPrincipal principal)
         {
-            // User için detaylı versiyon
+            // 1. Kural: Her claim MUTLAKA Access Token'a gitmeli (API'nin yetki kontrolü için)
             yield return Destinations.AccessToken;
 
-            if (claim.Type == Claims.Name || claim.Type == Claims.Email)
-                yield return Destinations.IdentityToken;
+            // 2. Kural: Kimlik bilgileri Identity Token'a da gitmeli (Frontend'in kullanıcıyı tanıması için)
+            switch (claim.Type)
+            {
+                case Claims.Name:       // "name"
+                case Claims.Email:      // "email"
+                case Claims.Subject:    // "sub" (Hata almamak için bu şart!)
+                case Claims.Role:       // "role"
+                case "client_id":                           // Özel claimlerimiz
+                    yield return Destinations.IdentityToken;
+                    yield break;
+            }
         }
         #endregion
     }

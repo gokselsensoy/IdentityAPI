@@ -66,10 +66,8 @@ namespace IdentityApi.Controllers
             return Ok("Verification email sent to new address. Please confirm.");
         }
 
-        // Not: Bu endpoint'e "yeni" email'deki linkten tıklandığı için,
-        // kullanıcı "giriş yapmamış" olabilir. Bu yüzden [AllowAnonymous]
         [AllowAnonymous]
-        [HttpGet("confirm-email-change")] // Genelde linkler GET olur
+        [HttpGet("confirm-email-change")]
         public async Task<IActionResult> ConfirmEmailChange([FromQuery] Guid userId, [FromQuery] string token, [FromQuery] string newEmail)
         {
             var user = await _userManager.FindByIdAsync(userId.ToString());

@@ -3,12 +3,12 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace IdentityApi.Services.Concrete
 {
-    public class ClientRegistrationService : IHostedService
+    public class ClientRegistrationWorker : IHostedService
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly IConfiguration _configuration;
 
-        public ClientRegistrationService(
+        public ClientRegistrationWorker(
             IServiceProvider serviceProvider,
             IConfiguration configuration)
         {
@@ -59,8 +59,13 @@ namespace IdentityApi.Services.Concrete
                         Permissions.Endpoints.Token,
                         Permissions.Endpoints.Revocation,
                         Permissions.GrantTypes.Password,
-                        Permissions.GrantTypes.RefreshToken
-                       
+                        Permissions.GrantTypes.RefreshToken,
+                        Permissions.Scopes.Email,
+                        Permissions.Scopes.Profile,
+                        Permissions.Scopes.Roles,
+                        Permissions.Prefixes.Scope + "logistics_api",
+                        Permissions.Prefixes.Scope + "offline_access"
+
                     }
                 }, cancellationToken);
             }
@@ -77,7 +82,12 @@ namespace IdentityApi.Services.Concrete
                         Permissions.Endpoints.Token,
                         Permissions.Endpoints.Revocation,
                         Permissions.GrantTypes.Password,
-                        Permissions.GrantTypes.RefreshToken
+                        Permissions.GrantTypes.RefreshToken,
+                        Permissions.Scopes.Email,
+                        Permissions.Scopes.Profile,
+                        Permissions.Scopes.Roles,
+                        Permissions.Prefixes.Scope + "logistics_api",
+                        Permissions.Prefixes.Scope + "offline_access"
                     }
                 }, cancellationToken);
             }
