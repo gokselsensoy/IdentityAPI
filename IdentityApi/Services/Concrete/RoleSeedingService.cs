@@ -22,7 +22,7 @@ namespace IdentityApi.Services.Concrete
             var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
 
             // Projende kullanacağın tüm rolleri buraya listele
-            var roles = new[] { "Multillo.Admin", "Multillo.Customer", "Multillo.Supplier", "Multillo.Transporter", "Multillo.Worker", "Multillo.Freelancer" };
+            var roles = new[] { "SuperAdmin", "Transporter", "Supplier", "Freelancer", "CorporateCustomer", "IndividualCustomer" };
 
             foreach (var roleName in roles)
             {
