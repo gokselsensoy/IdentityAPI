@@ -64,7 +64,8 @@ namespace IdentityApi.Services.Concrete
                         Permissions.Scopes.Profile,
                         Permissions.Scopes.Roles,
                         Permissions.Prefixes.Scope + "logistics_api",
-                        Permissions.Prefixes.Scope + "offline_access"
+                        Permissions.Prefixes.Scope + "offline_access",
+                        Permissions.Prefixes.GrantType + "profile_exchange"
 
                     }
                 }, cancellationToken);
@@ -87,7 +88,8 @@ namespace IdentityApi.Services.Concrete
                         Permissions.Scopes.Profile,
                         Permissions.Scopes.Roles,
                         Permissions.Prefixes.Scope + "logistics_api",
-                        Permissions.Prefixes.Scope + "offline_access"
+                        Permissions.Prefixes.Scope + "offline_access",
+                        Permissions.Prefixes.GrantType + "profile_exchange"
                     }
                 }, cancellationToken);
             }

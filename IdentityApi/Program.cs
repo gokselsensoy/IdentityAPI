@@ -56,23 +56,28 @@ builder.Services.AddOpenIddict()
     {
         // Token, Authorize, UserInfo gibi endpoint'leri aktif et
         options.SetAuthorizationEndpointUris("/connect/authorize")
-               .SetTokenEndpointUris("/connect/token")
+               .SetTokenEndpointUris("/connect/token", "/api/token/generate-for-profile")
                .SetRevocationEndpointUris("/connect/revoke")
                .SetUserInfoEndpointUris("/connect/userinfo");
 
+        options.SetIssuer(new Uri("https://localhost:7296"));
+
         // OAuth 2.0 Akışları:
         // Mobil/Web "password" akışına izin ver (Kullanıcı Adı/Şifre)
-        options.AllowPasswordFlow();
+        options.AllowPasswordFlow(); // Kullanıcı Adı + Şifre için
         // İleride tarayıcı tabanlı (PKCE) için:
         // options.AllowAuthorizationCodeFlow().RequireProofKeyForCodeExchange();
-        // Token yenileme
-        options.AllowRefreshTokenFlow();
-        options.AllowClientCredentialsFlow(); // 1. Client Credentials akışına izin ver
+        options.AllowRefreshTokenFlow(); // Token yenilemek için
+        options.AllowClientCredentialsFlow(); // Servisler arası iletişim için
+
+        options.AllowCustomFlow("profile_exchange");
 
         // Geliştirme ortamı için geçici imzalama ve şifreleme sertifikaları
         // Production'da X.509 sertifikası kullanmalıyız.
         options.AddDevelopmentEncryptionCertificate()
                .AddDevelopmentSigningCertificate();
+
+        options.DisableAccessTokenEncryption(); // Development
 
         // ASP.NET Core (Authentication, Cookies) ile entegre et
         options.UseAspNetCore()
