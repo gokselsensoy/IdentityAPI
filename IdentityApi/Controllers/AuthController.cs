@@ -157,26 +157,36 @@ namespace IdentityApi.Controllers
         [HttpPost("internal-register")]
         public async Task<IActionResult> RegisterInternal([FromBody] CreateInternalUserRequest request)
         {
-            var userExists = await _userManager.FindByEmailAsync(request.Email);
-            if (userExists != null)
-                return BadRequest("User with this email already exists.");
+            var user = await _userManager.FindByEmailAsync(request.Email);
 
-            var user = new ApplicationUser
+            if (user == null)
             {
-                Id = Guid.NewGuid(),
-                Email = request.Email,
-                UserName = request.Email
-            };
+                user = new ApplicationUser
+                {
+                    Id = Guid.NewGuid(),
+                    Email = request.Email,
+                    UserName = request.Email
+                };
 
-            var result = await _userManager.CreateAsync(user, request.Password);
-            if (!result.Succeeded)
-                return BadRequest(result.Errors);
+                var result = await _userManager.CreateAsync(user, request.Password);
+                if (!result.Succeeded)
+                    return BadRequest(result.Errors);
 
-            var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-            await _userManager.ConfirmEmailAsync(user, token);
+                var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+                await _userManager.ConfirmEmailAsync(user, token);
+            }
 
-            await _userManager.AddToRoleAsync(user, request.Role);
+            bool isInRole = await _userManager.IsInRoleAsync(user, request.Role);
 
+            if (!isInRole)
+            {
+                var roleResult = await _userManager.AddToRoleAsync(user, request.Role);
+
+                if (!roleResult.Succeeded)
+                {
+                    return BadRequest(roleResult.Errors);
+                }
+            }
 
             return Ok(new CreateInternalUserResponse(user.Id, user.Email));
         }

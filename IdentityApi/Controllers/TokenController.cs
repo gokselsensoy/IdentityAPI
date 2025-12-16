@@ -37,9 +37,11 @@ namespace IdentityApi.Controllers
 
             // 2. Parametreleri Oku (request["key"] şeklinde)
             // Client tarafında gönderdiğimiz key isimleriyle aynı olmalı.
-            var userIdStr = (string?)request["user_id"];
+            var userIdStr = (string?)request["user_id"];      // Identity ID
+            var appUserIdStr = (string?)request["app_user_id"]; // <-- YENİ: Logistics DB ID'si
             var companyIdStr = (string?)request["company_id"];
             var profileType = (string?)request["profile_type"];
+            var profileIdStr = (string?)request["profile_id"];
 
             // Roller liste olarak gelebilir (GetParameter parametre adıdır)
             var rolesParam = request.GetParameter("roles");
@@ -77,14 +79,20 @@ namespace IdentityApi.Controllers
             if (user == null) return NotFound("Kullanıcı bulunamadı.");
 
             // 4. Principal Oluştur (Manuel DTO yerine buradaki değişkenleri kullanıyoruz)
-            var principal = await CreatePrincipalAsync(user, companyIdStr, profileType, roles);
+            var principal = await CreatePrincipalAsync(user, appUserIdStr, companyIdStr, profileType, profileIdStr, roles);
 
             // 5. Token Bas
             return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         }
 
         // CreatePrincipalAsync Metodunu da yeni parametrelere göre güncelle:
-        private async Task<ClaimsPrincipal> CreatePrincipalAsync(ApplicationUser user, string? companyId, string? profileType, List<string?> roles)
+        private async Task<ClaimsPrincipal> CreatePrincipalAsync(
+            ApplicationUser user,
+            string? appUserId,
+            string? companyId,
+            string? profileType,
+            string? profileId,
+            List<string> roles)
         {
             var principal = await _signInManager.CreateUserPrincipalAsync(user);
             var identity = (ClaimsIdentity)principal.Identity!;
@@ -99,18 +107,16 @@ namespace IdentityApi.Controllers
                 identity.AddClaim(new Claim(Claims.Subject, userId));
             }
 
-            var scopes = new HashSet<string>
+            if (!string.IsNullOrEmpty(appUserId))
             {
-                Scopes.OpenId,
-                Scopes.Email,
-                Scopes.Profile,
-                Scopes.OfflineAccess,
-                "logistics_api",
-                Scopes.Roles
-            };
-            principal.SetScopes(scopes);
+                identity.AddClaim(new Claim("app_user_id", appUserId));
+            }
 
-            // Parametreleri Claim'e dönüştür
+            if (!string.IsNullOrEmpty(profileId))
+            {
+                identity.AddClaim(new Claim("profile_id", profileId));
+            }
+
             if (!string.IsNullOrEmpty(companyId))
             {
                 identity.AddClaim(new Claim("company_id", companyId));
@@ -129,6 +135,17 @@ namespace IdentityApi.Controllers
                         identity.AddClaim(new Claim(ClaimTypes.Role, role));
                 }
             }
+
+            var scopes = new HashSet<string>
+            {
+                Scopes.OpenId,
+                Scopes.Email,
+                Scopes.Profile,
+                Scopes.OfflineAccess,
+                "logistics_api",
+                Scopes.Roles
+            };
+            principal.SetScopes(scopes);
 
             foreach (var claim in principal.Claims)
             {
@@ -149,23 +166,17 @@ namespace IdentityApi.Controllers
             {
                 switch (claim.Type)
                 {
-                    case Claims.Name:
-                    case Claims.Email:
-                    case "company_id":   // Bizim özel claim
-                    case "profile_type": // Bizim özel claim
-                        yield return Destinations.IdentityToken;
+                    case OpenIddictConstants.Claims.Name:
+                    case OpenIddictConstants.Claims.Email:
+                    case OpenIddictConstants.Claims.Subject:
+                    case "company_id":
+                    case "profile_type":
+                    case "app_user_id": // <-- ID Token'a da eklensin
+                    case "profile_id":  // <-- ID Token'a da eklensin
+                        yield return OpenIddictConstants.Destinations.IdentityToken;
                         yield break;
                 }
             }
         }
-    }
-
-    // DTO
-    public class GenerateTokenRequest
-    {
-        public Guid UserId { get; set; }
-        public Guid? CompanyId { get; set; }
-        public string ProfileType { get; set; } // "Worker", "Freelancer"
-        public List<string> Roles { get; set; }
     }
 }
