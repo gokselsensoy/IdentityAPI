@@ -1,0 +1,109 @@
+trigger:
+- publish-test
+
+pool:
+  name: Default
+  demands:
+    - Agent.Name -equals agent-on-windows
+
+variables:
+  projectFolder: 'C:\\inetpub\\TestMultilloAuth'
+  newProjectFolder: 'C:\\inetpub\\Deploy\\TestMultilloAuth'
+  backupFolder: 'C:\\inetpub\\Backup\\TestMultilloAuth'
+  scriptFolder: '$(Build.ArtifactStagingDirectory)\\Scripts'
+
+steps:
+
+# .NET SDK
+- task: UseDotNet@2
+  inputs:
+    packageType: 'sdk'
+    version: '9.x'
+
+# Restore
+- script: dotnet restore
+  displayName: 'Restore Dependencies'
+
+# Build
+- script: dotnet build --configuration Release
+  displayName: 'Build Solution'
+
+# ✅ IdentityApi projesini publish et (IdentityApi.csproj)
+- script: dotnet publish ./IdentityApi/IdentityApi.csproj --configuration Release --output $(Build.ArtifactStagingDirectory)
+  displayName: 'Publish IdentityApi Project'
+
+# ✅ Yayınlanan içeriği Deploy klasörüne kopyala
+- task: PowerShell@2
+  inputs:
+    targetType: 'inline'
+    script: |
+      $source = "$(Build.ArtifactStagingDirectory)"
+      $destination = "C:\\inetpub\\Deploy\\TestMultilloAuth"
+      New-Item -Path $destination -ItemType Directory -Force | Out-Null
+      Copy-Item -Path "$source\*" -Destination $destination -Recurse -Force
+  displayName: 'Copy Published Files to Deploy-TestMultilloAuth'
+
+# Script klasörü oluştur
+- task: PowerShell@2
+  inputs:
+    targetType: 'inline'
+    script: |
+      New-Item -ItemType Directory -Path "$(scriptFolder)" -Force
+  displayName: 'Create Scripts Directory'
+
+# BackupAndCopy.ps1 oluştur
+- task: PowerShell@2
+  inputs:
+    targetType: 'inline'
+    script: |
+      $content = "`$sourcePath = '$(projectFolder)'`n" +
+                 "`$backupPath = '$(backupFolder)\\TestMultilloAuth_' + (Get-Date -Format yyyyMMddHHmmss)`n" +
+                 "Copy-Item -Path `$sourcePath -Destination `$backupPath -Recurse -Force"
+      $scriptPath = "$(scriptFolder)\\BackupAndCopy.ps1"
+      $content | Set-Content -Path $scriptPath -Force
+  displayName: 'Create Backup Script'
+
+- task: PowerShell@2
+  inputs:
+    targetType: 'inline'
+    script: |
+      $scriptLines = @()
+      $scriptLines += "Write-Host 'Stopping IIS...'"
+      $scriptLines += "iisreset /stop"
+      $scriptLines += "`$projectPath = '$(projectFolder)'"
+      $scriptLines += "`$newProjectPath = '$(newProjectFolder)'"
+      $scriptLines += ""
+      $scriptLines += "# HEDEF KLASÖRÜ TEMİZLE (Appsettings dahil her şeyi siler)"
+      $scriptLines += "Get-ChildItem -Path `$projectPath -Recurse -Force | ForEach-Object {"
+      $scriptLines += "    try {"
+      $scriptLines += "        Remove-Item -Path `$_.FullName -Recurse -Force -ErrorAction Stop"
+      $scriptLines += "    } catch {"
+      $scriptLines += "        Write-Host `"Skipped locked or protected file: `$($_.FullName)`""
+      $scriptLines += "    }"
+      $scriptLines += "}"
+      $scriptLines += ""
+      $scriptLines += "Write-Host 'Copying new files...'"
+      $scriptLines += "Copy-Item -Path `$newProjectPath\\* -Destination `$projectPath -Recurse -Force"
+      $scriptLines += ""
+      $scriptLines += "Write-Host 'Starting IIS...'"
+      $scriptLines += "iisreset /start"
+
+      $scriptPath = "$(scriptFolder)\\Deploy.ps1"
+      $scriptLines | Set-Content -Path $scriptPath -Force
+  displayName: 'Create Deploy Script (Overwrite All)'
+
+# Backup çalıştır
+- task: PowerShell@2
+  inputs:
+    targetType: 'filePath'
+    filePath: '$(scriptFolder)\\BackupAndCopy.ps1'
+    errorActionPreference: 'stop'
+  displayName: 'Run Backup Script'
+
+# Deploy çalıştır
+- task: PowerShell@2
+  inputs:
+    targetType: 'filePath'
+    filePath: '$(scriptFolder)\\Deploy.ps1'
+    errorActionPreference: 'stop'
+  displayName: 'Run Deploy Script'
