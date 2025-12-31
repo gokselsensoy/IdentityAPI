@@ -5,175 +5,210 @@ using IdentityApi.Services.Concrete;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Validation.AspNetCore;
+using Serilog;
+using System.Reflection;
 
-var builder = WebApplication.CreateBuilder(args);
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File("C:/Logs/IdentityApi/startup-log-.txt", rollingInterval: RollingInterval.Day) // Sunucu debug için
+    .CreateBootstrapLogger();
 
-builder.Services.AddIdentity<ApplicationUser, ApplicationRole>(options =>
+try
 {
-    options.SignIn.RequireConfirmedEmail = true;
+    var builder = WebApplication.CreateBuilder(args);
 
-    options.Password.RequireDigit = false;
-    options.Password.RequiredLength = 4;
-    options.Password.RequireLowercase = false;
-    options.Password.RequireUppercase = false;
-    options.Password.RequireNonAlphanumeric = false;
-    options.User.RequireUniqueEmail = true;
+    // 2. Serilog Host Entegrasyonu
+    builder.Host.UseSerilog((context, services, configuration) => configuration
+        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext()
+        .WriteTo.Console());
 
-    options.Tokens.EmailConfirmationTokenProvider = "EmailConfirmation";
-    options.Tokens.PasswordResetTokenProvider = "PasswordReset";
-})
-    .AddEntityFrameworkStores<IdentityDbContext>()
-    .AddDefaultTokenProviders()
-    .AddTokenProvider<DataProtectorTokenProvider<ApplicationUser>>("EmailConfirmation")
-    .AddTokenProvider<DataProtectorTokenProvider<ApplicationUser>>("PasswordReset");
+    // 3. CORS Ayarları (Frontend'in Identity'e erişebilmesi için şart)
+    var corsSettings = builder.Configuration.GetSection("CorsSettings");
+    var allowedOrigins = corsSettings.GetSection("AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 
-builder.Services.Configure<DataProtectionTokenProviderOptions>(options =>
-{
-    // Tüm token'lar için varsayılan süre
-    options.TokenLifespan = TimeSpan.FromHours(2);
-});
-
-builder.Services.Configure<DataProtectionTokenProviderOptions>("EmailConfirmation", options =>
-{
-    // Email onay token'ı için özel süre (örn: 15 dakika)
-    options.TokenLifespan = TimeSpan.FromMinutes(15);
-});
-
-builder.Services.Configure<DataProtectionTokenProviderOptions>("PasswordReset", options =>
-{
-    // Şifre sıfırlama token'ı için özel süre (örn: 30 dakika)
-    options.TokenLifespan = TimeSpan.FromMinutes(30);
-});
-
-// 3. OpenIddict'i yapılandır
-builder.Services.AddOpenIddict()
-    .AddCore(options =>
+    builder.Services.AddCors(options =>
     {
-        options.UseEntityFrameworkCore()
-               .UseDbContext<IdentityDbContext>();
-    })
-    .AddServer(options =>
-    {
-        // Token, Authorize, UserInfo gibi endpoint'leri aktif et
-        options.SetAuthorizationEndpointUris("/connect/authorize")
-               .SetTokenEndpointUris("/connect/token", "/api/token/generate-for-profile")
-               .SetRevocationEndpointUris("/connect/revoke")
-               .SetUserInfoEndpointUris("/connect/userinfo");
-
-        options.SetIssuer(new Uri("https://localhost:7296"));
-
-        // OAuth 2.0 Akışları:
-        // Mobil/Web "password" akışına izin ver (Kullanıcı Adı/Şifre)
-        options.AllowPasswordFlow(); // Kullanıcı Adı + Şifre için
-        // İleride tarayıcı tabanlı (PKCE) için:
-        // options.AllowAuthorizationCodeFlow().RequireProofKeyForCodeExchange();
-        options.AllowRefreshTokenFlow(); // Token yenilemek için
-        options.AllowClientCredentialsFlow(); // Servisler arası iletişim için
-
-        options.AllowCustomFlow("profile_exchange");
-
-        // Geliştirme ortamı için geçici imzalama ve şifreleme sertifikaları
-        // Production'da X.509 sertifikası kullanmalıyız.
-        options.AddDevelopmentEncryptionCertificate()
-               .AddDevelopmentSigningCertificate();
-
-        options.DisableAccessTokenEncryption(); // Development
-
-        // ASP.NET Core (Authentication, Cookies) ile entegre et
-        options.UseAspNetCore()
-               .EnableTokenEndpointPassthrough()
-               .EnableAuthorizationEndpointPassthrough()
-               .EnableUserInfoEndpointPassthrough();
-    })
-    .AddValidation(options => // Sunucunun kendi token'larını da doğrulayabilmesi için
-    {
-        options.UseLocalServer();
-        options.UseAspNetCore();
-    });
-
-builder.Services.AddDbContext<IdentityDbContext>(options =>
-{
-    options.UseNpgsql(builder.Configuration.GetConnectionString("IdentityConnection"));
-    options.UseOpenIddict();
-});
-
-
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("InternalApiAccess", policy =>
-    {
-        // Token'ın "client_id" claim'ini kontrol et
-        policy.AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-        policy.RequireClaim("client_id", "logistics_api_service");
-        // policy.RequireScope("internal_api"); 
-    });
-});
-
-builder.Services.AddHostedService<MigrationService>();
-builder.Services.AddHostedService<RoleSeedingService>();
-builder.Services.AddHostedService<ClientRegistrationWorker>();
-builder.Services.AddHostedService<ScopeRegistrationWorker>();
-
-// === Email Servisi ===
-// IEmailService ve somut bir implementasyon eklemeliyiz
-// Şimdilik test için konsola yazan bir servis ekleyelim
-builder.Services.AddSingleton<IEmailService, LogToConsoleEmailService>();
-
-// === Webhook Servisi ===
-// IdentityAPI'nin LogisticsAPI'ye haber vermesi için bir servis
-builder.Services.AddHttpClient<IIntegrationService, HttpWebhookIntegrationService>(client =>
-{
-    // LogisticsAPI'nin adresini appsettings'den okuyacağız
-    client.BaseAddress = new Uri(builder.Configuration["IntegrationSettings:LogisticsApiBaseUrl"]);
-    // TODO: Buraya bir API Key veya client credentials ile güvenlik eklenmeli
-});
-
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
-{
-    // 1. Swagger'a "Bearer" şemasını tanımla
-    options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-        Scheme = "Bearer",
-        BearerFormat = "JWT",
-        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Description = "JWT Authorization header using the Bearer scheme."
-    });
-
-    // 2. Bu güvenliği tüm endpoint'lere uygula
-    options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
-    {
+        options.AddPolicy("AllowSpecificOrigins", policyBuilder =>
         {
-            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            if (allowedOrigins.Any())
             {
-                Reference = new Microsoft.OpenApi.Models.OpenApiReference
-                {
-                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            new string[] {}
-        }
+                policyBuilder.WithOrigins(allowedOrigins)
+                             .AllowAnyHeader()
+                             .AllowAnyMethod()
+                             .AllowCredentials();
+            }
+            else
+            {
+                policyBuilder.AllowAnyOrigin()
+                             .AllowAnyHeader()
+                             .AllowAnyMethod()
+                             .AllowCredentials();
+            }
+        });
     });
-});
 
-var app = builder.Build();
+    builder.Services.AddIdentity<ApplicationUser, ApplicationRole>(options =>
+    {
+        options.SignIn.RequireConfirmedEmail = true;
+        options.Password.RequireDigit = false;
+        options.Password.RequiredLength = 4;
+        options.Password.RequireLowercase = false;
+        options.Password.RequireUppercase = false;
+        options.Password.RequireNonAlphanumeric = false;
+        options.User.RequireUniqueEmail = true;
+        options.Tokens.EmailConfirmationTokenProvider = "EmailConfirmation";
+        options.Tokens.PasswordResetTokenProvider = "PasswordReset";
+    })
+        .AddEntityFrameworkStores<IdentityDbContext>()
+        .AddDefaultTokenProviders()
+        .AddTokenProvider<DataProtectorTokenProvider<ApplicationUser>>("EmailConfirmation")
+        .AddTokenProvider<DataProtectorTokenProvider<ApplicationUser>>("PasswordReset");
 
-if (app.Environment.IsDevelopment())
-{
+    builder.Services.Configure<DataProtectionTokenProviderOptions>(options => options.TokenLifespan = TimeSpan.FromHours(2));
+    builder.Services.Configure<DataProtectionTokenProviderOptions>("EmailConfirmation", options => options.TokenLifespan = TimeSpan.FromMinutes(15));
+    builder.Services.Configure<DataProtectionTokenProviderOptions>("PasswordReset", options => options.TokenLifespan = TimeSpan.FromMinutes(30));
+
+    // --- Dynamic Issuer URL ---
+    var issuerUrl = builder.Configuration["GeneralSettings:IssuerUrl"];
+    if (string.IsNullOrEmpty(issuerUrl)) throw new Exception("GeneralSettings:IssuerUrl appsettings dosyasında bulunamadı!");
+
+    // 4. OpenIddict Konfigürasyonu
+    builder.Services.AddOpenIddict()
+        .AddCore(options =>
+        {
+            options.UseEntityFrameworkCore().UseDbContext<IdentityDbContext>();
+        })
+        .AddServer(options =>
+        {
+            options.SetAuthorizationEndpointUris("/connect/authorize")
+                   .SetTokenEndpointUris("/connect/token", "/api/token/generate-for-profile")
+                   .SetRevocationEndpointUris("/connect/revoke")
+                   .SetUserInfoEndpointUris("/connect/userinfo");
+
+            // Config'den gelen URL'i kullan
+            options.SetIssuer(new Uri(issuerUrl));
+
+            options.AllowPasswordFlow();
+            options.AllowRefreshTokenFlow();
+            options.AllowClientCredentialsFlow();
+            options.AllowCustomFlow("profile_exchange");
+
+            // --- SERTİFİKA AYARI (ÖNEMLİ) ---
+            if (builder.Environment.IsDevelopment())
+            {
+                // Development ortamında standart dev sertifikaları
+                options.AddDevelopmentEncryptionCertificate()
+                       .AddDevelopmentSigningCertificate();
+
+                options.DisableAccessTokenEncryption();
+            }
+            else
+            {
+                // Production/Test ortamında "Ephemeral" (Geçici) anahtarlar
+                // Not: Sunucu yeniden başlatılırsa login olanların token'ı geçersiz kalır.
+                // Gerçek Prod için .pfx dosyası yüklenmelidir (AddEncryptionCertificate).
+                options.AddEphemeralEncryptionKey()
+                       .AddEphemeralSigningKey();
+
+                options.DisableAccessTokenEncryption(); // Test kolaylığı için şifrelemeyi kapattım, prod için açılabilir.
+            }
+
+            options.UseAspNetCore()
+                   .EnableTokenEndpointPassthrough()
+                   .EnableAuthorizationEndpointPassthrough()
+                   .EnableUserInfoEndpointPassthrough();
+        })
+        .AddValidation(options =>
+        {
+            options.UseLocalServer();
+            options.UseAspNetCore();
+        });
+
+    builder.Services.AddDbContext<IdentityDbContext>(options =>
+    {
+        options.UseNpgsql(builder.Configuration.GetConnectionString("IdentityConnection"));
+        options.UseOpenIddict();
+    });
+
+    builder.Services.AddAuthorization(options =>
+    {
+        options.AddPolicy("InternalApiAccess", policy =>
+        {
+            policy.AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+            policy.RequireClaim("client_id", "logistics_api_service");
+        });
+    });
+
+    builder.Services.AddHostedService<MigrationService>();
+    builder.Services.AddHostedService<RoleSeedingService>();
+    builder.Services.AddHostedService<ClientRegistrationWorker>();
+    builder.Services.AddHostedService<ScopeRegistrationWorker>();
+
+    builder.Services.AddSingleton<IEmailService, LogToConsoleEmailService>();
+
+    builder.Services.AddHttpClient<IIntegrationService, HttpWebhookIntegrationService>(client =>
+    {
+        client.BaseAddress = new Uri(builder.Configuration["IntegrationSettings:LogisticsApiBaseUrl"]);
+    });
+
+    builder.Services.AddControllers();
+    builder.Services.AddEndpointsApiExplorer();
+
+    // --- Swagger ---
+    builder.Services.AddSwaggerGen(options =>
+    {
+        options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+        {
+            Name = "Authorization",
+            Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+            Scheme = "Bearer",
+            BearerFormat = "JWT",
+            In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+            Description = "JWT Authorization header using the Bearer scheme."
+        });
+
+        options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+        {
+            {
+                new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+                {
+                    Reference = new Microsoft.OpenApi.Models.OpenApiReference { Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme, Id = "Bearer" }
+                },
+                new string[] {}
+            }
+        });
+    });
+
+    var app = builder.Build();
+
+    // Swagger her ortamda açık
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    app.UseHttpsRedirection();
+
+    // Serilog Request Logging (UseRouting'den önce olsa iyi olur ama şart değil)
+    app.UseSerilogRequestLogging();
+
+    app.UseRouting();
+
+    // CORS Middleware Eklendi
+    app.UseCors("AllowSpecificOrigins");
+
+    app.UseAuthentication();
+    app.UseAuthorization();
+
+    app.MapControllers();
+
+    app.Run();
 }
-
-app.UseHttpsRedirection();
-app.UseRouting();
-
-app.UseAuthentication();
-app.UseAuthorization();
-
-app.MapControllers();
-
-app.Run();
+catch (Exception ex)
+{
+    Log.Fatal(ex, "IdentityApi Host terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
